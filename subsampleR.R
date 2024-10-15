@@ -89,6 +89,17 @@ step_metadata <- function(pipeline_object, metadata, cols = NULL) {
 #' subsample <- step_import("data/my_data.csv") |> step_subsample(100, "Sex", c("M" = 0.3, "F" = 0.7))
 step_subsample <- function(pipeline_object, n_samples, variable = NULL, ratio = NULL, seed = 123) {
   
+  # Check if the pipeline object contains already sampling steps
+  existing_keys <- names(pipeline_object$subsample)
+  if (length(existing_keys) == 0) {
+    step_number <- 1  # Start with 1 if no keys exist
+  } else {
+    # Extract step numbers and find the next available number
+    step_numbers <- as.numeric(gsub("subsample_", "", existing_keys))
+    step_number <- max(step_numbers, na.rm = TRUE) + 1  # Increment the highest number by 1
+  }
+  key <- paste0("subsample_", step_number)
+  
   # Checks for input param `variable`
   if (!is.null(variable) && !(variable %in% colnames(pipeline_object$data))) {
     stop(paste("The variable", variable, "does not exist in the data."))
@@ -114,7 +125,7 @@ step_subsample <- function(pipeline_object, n_samples, variable = NULL, ratio = 
   if (is.null(variable)) {
     df_subset <- pipeline_object$data |> sample_n(n_samples)
     df_subset <- as_tibble(df_subset)
-    pipeline_object$subset <- df_subset
+    pipeline_object$subsample[[key]]$subset <- df_subset
   } else {
     ratio <- setNames(ratio, unique_values)
     n_per_category <- round(n_samples * ratio)
@@ -139,9 +150,51 @@ step_subsample <- function(pipeline_object, n_samples, variable = NULL, ratio = 
       df_subset <- bind_rows(df_subset, sampled_category)
     }
     df_subset <- as_tibble(df_subset)
-    pipeline_object$subset <- df_subset
-    pipeline_object$sampled_params <- list(variable = variable, ratio = ratio, seed = seed)
+    pipeline_object$subsample[[key]]$subset <- df_subset
+    pipeline_object$subsample[[key]]$sampled_params <- list(variable = variable, 
+                                                            ratio = ratio, 
+                                                            seed = seed)
   }
+  
+  return(pipeline_object)
+}
+
+
+step_ks_test <- function(pipeline_object, cols = NULL) {
+  
+  initial_data <- pipeline_object$data
+  subsample_data <- pipeline_object$subset
+  ks_results <- list()
+
+  # Loop through each specified column and perform the KS test
+  for (col in cols) {
+    # Check if the column exists in both datasets
+    if (!(col %in% colnames(initial_data)) || !(col %in% colnames(subsample_data))) {
+      warning(paste("Column", col, "not found in one of the datasets. Skipping."))
+      next
+    }
+
+    initial_values <- initial_data[[col]]
+    subsample_values <- subsample_data[[col]]
+    
+    # If the column is not numeric, convert it to numeric using factor
+    if (!is.numeric(initial_values)) {
+      # Convert both datasets to numeric using the same levels
+      levels <- union(unique(initial_values), unique(subsample_values))
+      initial_values <- as.numeric(factor(initial_values, levels = levels))
+      subsample_values <- as.numeric(factor(subsample_values, levels = levels))
+    }
+
+    ks_res <- ks.test(initial_values, subsample_values)
+    ks_results[[col]] <- list(
+      D_statistic = ks_res$statistic[["D"]],    # D statistic
+      p_value = ks_res$p.value,          # p-value
+      null_hypothesis = ifelse(ks_res$p.value < 0.05, FALSE, TRUE)  # Null hypothesis
+    )
+  }
+  
+  ks_df <- do.call(rbind, lapply(ks_results, as.data.frame))
+  pipeline_object$ks_test_results <- as_tibble(ks_df)
   
   return(pipeline_object)
 }
