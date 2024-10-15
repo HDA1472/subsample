@@ -74,8 +74,8 @@ step_metadata <- function(pipeline_object, metadata, cols = NULL) {
 #' @param ratio The ratio of samples to select per category (optional)
 #' @param seed The random seed for reproducibility (default = 123)
 #'
-#' @return
-#' @export
+#' @return A pipeline object containing the sub-sampled data
+#' @export 
 #'
 #' @examples
 #' # Sub-sample 100 rows from the data
@@ -160,10 +160,53 @@ step_subsample <- function(pipeline_object, n_samples, variable = NULL, ratio = 
 }
 
 
-step_ks_test <- function(pipeline_object, cols = NULL) {
+#' Perform Kolmogorov-Smirnov (KS) test
+#' 
+#' This function performs the Kolmogorov-Smirnov (KS) test between the population data and the sub-sampled data.
+#' The KS test is performed for each specified column, and the results are stored in the pipeline object.
+#'
+#' @param pipeline_object A pipeline object containing the data and sub-sampled data
+#' @param population The population data (default = "data")
+#' @param sample The sub-sampled data (default = "subsample_1")
+#' @param cols A character vector of column names to perform the KS test
+#'
+#' @return A pipeline object containing the KS test results
+#' @export
+#'
+#' @examples
+#' # Perform KS test on the "Age" and "BMI" columns
+#' ks_results <- step_import("data/my_data.csv") |> step_subsample(100) |> step_ks_test(cols = c("Age", "BMI"))
+#' 
+#' # Perform KS test on the "Age" and "BMI" columns using the sub-sampled data from step 2
+#' ks_results <- step_import("data/my_data.csv") |> 
+#'   step_subsample(100) |> 
+#'   step_subsample(50) |> 
+#'   step_ks_test(sample = "subsample_2", cols = c("Age", "BMI"))
+#'   
+#' # Perform KS test on the "Age" and "BMI" columns using the sub-sampled data from step 2 and population data from step 1
+#' ks_results <- step_import("data/my_data.csv") |>
+#'  step_subsample(100) |>
+#'  step_subsample(50) |>
+#'  step_ks_test(population = "subsample_1", sample = "subsample_2", cols = c("Age", "BMI"))
+step_ks_test <- function(pipeline_object, population = "data", sample = "subsample_1", cols = NULL) {
   
-  initial_data <- pipeline_object$data
-  subsample_data <- pipeline_object$subset
+  # Check if the pipeline object contains already KS steps
+  existing_keys <- names(pipeline_object$ks_test_results)
+  if (length(existing_keys) == 0) {
+    step_number <- 1  # Start with 1 if no keys exist
+  } else {
+    # Extract step numbers and find the next available number
+    step_numbers <- as.numeric(gsub("ks_test_", "", existing_keys))
+    step_number <- max(step_numbers, na.rm = TRUE) + 1  # Increment the highest number by 1
+  }
+  key <- paste0("ks_test_", step_number)
+  
+  if (population != "data") {
+    initial_data <- pipeline_object$subsample[[population]]$subset
+  } else {
+    initial_data <- pipeline_object[[population]]
+  }
+  subsample_data <- pipeline_object$subsample[[sample]]$subset
   ks_results <- list()
 
   # Loop through each specified column and perform the KS test
@@ -194,7 +237,7 @@ step_ks_test <- function(pipeline_object, cols = NULL) {
   }
   
   ks_df <- do.call(rbind, lapply(ks_results, as.data.frame))
-  pipeline_object$ks_test_results <- as_tibble(ks_df)
+  pipeline_object$ks_test_results[[key]] <- as_tibble(ks_df)
   
   return(pipeline_object)
 }
