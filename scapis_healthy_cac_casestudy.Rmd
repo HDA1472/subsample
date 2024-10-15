@@ -183,5 +183,5 @@ cac_daids <- cac_patients$subsample$subsample_1$subset |>
 ```{r}
 daids <- bind_rows(healthy_daids, cac_daids) |> mutate(Cohort = "SCAPIS")
 
-write.table(daids, file='data/scapis_healthy_cac_samples.tsv', sep='\t')
+write.table(daids, file='data/scapis_healthy_cac_samples.tsv', sep='\t', row.names = FALSE, quote = FALSE)
 ```

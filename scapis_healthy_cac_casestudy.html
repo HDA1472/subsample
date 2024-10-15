@@ -562,7 +562,7 @@ use.</p>
 <h1>Save data</h1>
 <pre class="r"><code>daids &lt;- bind_rows(healthy_daids, cac_daids) |&gt; mutate(Cohort = &quot;SCAPIS&quot;)
 
-write.table(daids, file=&#39;data/scapis_healthy_cac_samples.tsv&#39;, sep=&#39;\t&#39;)</code></pre>
+write.table(daids, file=&#39;data/scapis_healthy_cac_samples.tsv&#39;, sep=&#39;\t&#39;, row.names = FALSE, quote = FALSE)</code></pre>
 </div>
 
 
