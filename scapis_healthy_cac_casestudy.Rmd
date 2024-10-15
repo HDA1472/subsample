@@ -1,0 +1,187 @@
+---
+title: "scapis_healthy_cac_casestudy"
+author: "Konstantinos Antonopoulos"
+date: "2024-10-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Import module and libraries
+
+First we will import the subsampleR module together with dplyr for some additional data manipulation.
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(dplyr)
+source("subsampleR.R")
+```
+
+# Import data
+
+We will import all data needed for the analysis. The data is already preprocessed and saved in the data folder.
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+# Load the data
+load("data/metadata_preprocessed.rda")
+metadata <- df
+rm(df)
+
+cols <- c("DAid", "Sex", "Age", "BMI", "MS", "MASLD", "CAC", "Carotid_plaque", 
+          "Myocardial_infarction", "Atrial_fibrillation", "Coronary_artery_intervention", 
+          "Stroke", "COPD", "Asthma", "Tuberculosis", "Sleep_apnea", "Celiac_disease", 
+          "Crohn", "Rheumatic_disease", "T2D")  
+
+scapis <- step_import("data/scapis_joined_preprocessed.rda") 
+maria_list <- step_import("data/scapis_maria_list.tsv") |> step_metadata(metadata, cols = cols)
+```
+
+# Healthy samples
+
+We will start with the more straightforward case of healthy samples. We want to sub-sample them in order to have 200 samples 50% Male and 50% Female. After the sub-sampling we will check that the distributions between the sub-sampled data and the original data are similar using the Kolmogorov-Smirnov test and some histograms.
+
+## Import data and metadata
+
+```{r}
+# Separate the data in Healthy and CAC patients
+healthy_patients_hpa <- list()
+healthy_patients_hpa$data <- maria_list$data |> 
+  filter(Disease == "Healthy") |> 
+  select(DAid)
+healthy_patients_hpa <- healthy_patients_hpa |> step_metadata(metadata, cols = cols)
+```
+
+## Select patients
+
+```{r}
+healthy_patients <- healthy_patients_hpa |> 
+  step_subsample(n_samples = 200, variable = "Sex", ratio = 0.5)
+```
+
+## Evaluate distributions
+
+From the results we can see that all distributions are similar between the sub-sampled data and the original data. So, the sampling was successful.
+
+```{r, warning=FALSE, message=FALSE}
+cols_to_check <- c("Age", "BMI", "MS", "MASLD", "CAC", "Carotid_plaque", "Myocardial_infarction", 
+                   "Atrial_fibrillation", "Coronary_artery_intervention", "Stroke", "COPD", 
+                   "Asthma", "Tuberculosis", "Sleep_apnea", "Celiac_disease", "Crohn", 
+                   "Rheumatic_disease", "T2D")
+
+healthy_patients <- healthy_patients |> 
+  step_ks_test(cols = cols_to_check) |> 
+  step_visualize(cols = cols_to_check)
+
+# Print results and selected histograms
+healthy_patients$ks_test_results$ks_test_1
+healthy_patients$histograms$histograms_1$Age
+healthy_patients$histograms$histograms_1$BMI
+healthy_patients$histograms$histograms_1$Rheumatic_disease
+```
+
+Finally, we will select the DAids of the healthy patients for future use.
+
+```{r}
+healthy_daids <- healthy_patients$subsample$subsample_1$subset |> 
+  select(DAid) |> 
+  mutate(Disease = "Healthy")
+```
+
+# CAC samples
+
+Now, we are going to select 96 CAC patients with the same criteria. However, there is an issue with the previous approach. There are not enough female samples as the Warning suggest.
+
+```{r}
+cac_patients_hpa <- list()
+cac_patients_hpa$data <- maria_list$data |> 
+  filter(Disease == "Coronary artery calcification") |> 
+  select(DAid)
+cac_patients_hpa <- cac_patients_hpa |> step_metadata(metadata, cols = cols)
+```
+
+```{r}
+cac_patients <- cac_patients_hpa |> 
+  step_subsample(n_samples = 96, variable = "Sex", ratio = 0.5)
+```
+
+To solve this issue, we are going to include all female samples from this dataset and then select the remaining samples from the total SCAPIS dataset. In this case we want to include all initial female samples and then randomly select the rest from the SCAPIS cohort. But the initial samples are also included in SCAPIS and we want 48 unique female CAC samples. That is why we sample more so we can make sure we get 48 unique samples. Also, the CAC samples should not have any other CVD.
+
+```{r}
+# Separate the data based on Sex
+cac_female_hpa <- cac_patients_hpa$data |> 
+  filter(Sex == "F") |> 
+  select(DAid)
+nfemale <- cac_female_hpa |> count()
+
+cac_male_hpa <- cac_patients_hpa$data |> 
+  filter(Sex == "M") |> 
+  select(DAid)
+
+# CAC patients in all SCAPIS
+cac_female_scapis <- scapis$data |> 
+  select(-Sex, -Age, -Obesity, -T2D, -IGT, -MS, -MASLD, -CAC, -Carotid_plaque, -Sleep_apnea) |>
+  left_join(metadata |> select(all_of(cols)), by = "DAid") |> 
+  filter(Sex == "F", CAC == 1) |> 
+  mutate(other = rowSums(across(c("Myocardial_infarction", "Atrial_fibrillation", 
+                                  "Coronary_artery_intervention", "Stroke", 
+                                  "COPD", "Asthma")))) |> 
+  filter(other == 0) |> 
+  select(DAid)
+
+# Merge female samples and get 48 unique samples and then with all male samples
+cac_all <- cac_female_hpa |> 
+  bind_rows(cac_female_scapis |> sample_n((60))) |>
+  unique() |>
+  head(48) |> 
+  bind_rows(cac_male_hpa)
+  
+cac_patients_hpa$data <- cac_all 
+cac_patients_hpa <- cac_patients_hpa |> step_metadata(metadata, cols = cols)
+```
+
+## Select patients
+
+Now we don't get any warning!
+
+```{r}
+cac_patients <- cac_patients_hpa |> 
+  step_subsample(n_samples = 96, variable = "Sex", ratio = 0.5)
+```
+
+## Evaluate distributions
+
+From the results we can see that all distributions are similar between the sub-sampled data and the original data. So, the sampling was successful.
+
+```{r, warning=FALSE, message=FALSE}
+cols_to_check <- c("Age", "BMI", "MS", "MASLD", "CAC", "Carotid_plaque", "Myocardial_infarction", 
+                   "Atrial_fibrillation", "Coronary_artery_intervention", "Stroke", "COPD", 
+                   "Asthma", "Tuberculosis", "Sleep_apnea", "Celiac_disease", "Crohn", 
+                   "Rheumatic_disease", "T2D")
+
+cac_patients <- cac_patients |> 
+  step_ks_test(cols = cols_to_check) |> 
+  step_visualize(cols = cols_to_check)
+
+# Print results and selected histograms
+cac_patients$ks_test_results$ks_test_1
+cac_patients$histograms$histograms_1$Age
+cac_patients$histograms$histograms_1$BMI
+cac_patients$histograms$histograms_1$Rheumatic_disease
+```
+
+Finally, we will select the DAids of the healthy patients for future use.
+
+```{r}
+cac_daids <- cac_patients$subsample$subsample_1$subset |> 
+  select(DAid) |> 
+  mutate(Disease = "CAC")
+```
+
+# Save data
+
+```{r}
+daids <- bind_rows(healthy_daids, cac_daids) |> mutate(Cohort = "SCAPIS")
+
+write.table(daids, file='data/scapis_healthy_cac_samples.tsv', sep='\t')
+```

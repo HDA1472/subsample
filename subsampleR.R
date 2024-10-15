@@ -58,7 +58,7 @@ step_metadata <- function(pipeline_object, metadata, cols = NULL) {
     left_join(metadata |> select(all_of(cols)), by = "DAid")
   
   pipeline_object$data <- df_out
-  pipeline_object$metadata <- metadata
+  pipeline_object$metadata <- metadata |> select(all_of(cols))
   return(pipeline_object)
 }
 
