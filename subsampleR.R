@@ -3,7 +3,7 @@ library(readr)
 library(readxl)
 library(arrow)
 library(dplyr)
-
+library(ggplot2)
 
 #' Import data from various file formats
 #' 
@@ -239,5 +239,99 @@ step_ks_test <- function(pipeline_object, population = "data", sample = "subsamp
   ks_df <- do.call(rbind, lapply(ks_results, as.data.frame))
   pipeline_object$ks_test_results[[key]] <- as_tibble(ks_df)
   
+  return(pipeline_object)
+}
+
+
+#' Visualize the distribution of variables
+#' 
+#' This function visualizes the distribution of variables in the population and sub-sampled data.
+#'
+#' @param pipeline_object A pipeline object containing the data and sub-sampled data
+#' @param population The population data (default = "data")
+#' @param sample The sub-sampled data (default = "subsample_1")
+#' @param cols A character vector of column names to plot
+#'
+#' @return A pipeline object containing the plots
+#' @export
+#'
+#' @examples
+#' # Visualize the distribution of the "Age" and "BMI" columns
+#' pipeline <- step_import("data/my_data.csv") |> step_subsample(100) |> step_visualize(cols = c("Age", "BMI"))
+#' 
+#' # Visualize the distribution of the "Age" and "BMI" columns using the sub-sampled data from step 2
+#' pipeline <- step_import("data/my_data.csv") |>
+#'  step_subsample(100) |>
+#'  step_subsample(50) |>
+#'  step_visualize(sample = "subsample_2", cols = c("Age", "BMI"))
+#'  
+#' # Visualize the distribution of the "Age" and "BMI" columns using the sub-sampled data from step 2 and population data from step 1
+#' pipeline <- step_import("data/my_data.csv") |>
+#'  step_subsample(100) |>
+#'  step_subsample(50) |>
+#'  step_visualize(population = "subsample_1", sample = "subsample_2", cols = c("Age", "BMI"))
+step_visualize <- function(pipeline_object, population = "data", sample = "subsample_1", cols = NULL) {
+  
+  # Check if the pipeline object contains already KS steps
+  existing_keys <- names(pipeline_object$histograms)
+  if (length(existing_keys) == 0) {
+    step_number <- 1  # Start with 1 if no keys exist
+  } else {
+    # Extract step numbers and find the next available number
+    step_numbers <- as.numeric(gsub("histograms_", "", existing_keys))
+    step_number <- max(step_numbers, na.rm = TRUE) + 1  # Increment the highest number by 1
+  }
+  key <- paste0("histograms_", step_number)
+  
+  if (population != "data") {
+    initial_data <- pipeline_object$subsample[[population]]$subset
+  } else {
+    initial_data <- pipeline_object[[population]]
+  }
+  subsample_data <- pipeline_object$subsample[[sample]]$subset
+  plots_list <- list()
+  
+  # Iterate through each variable
+  for (col in cols) {
+    # Check if the variable exists in both subsets
+    if (!is.null(initial_data) && 
+        !is.null(subsample_data)) {
+      
+      plot_data <- initial_data |> 
+        select(all_of(col)) |> 
+        mutate(Group = "Population") |> 
+        rename(Value = col) %>%
+        bind_rows(subsample_data |> 
+                    select(all_of(col)) |> 
+                    mutate(Group = "Subset") |> 
+                    rename(Value = col))
+      
+      
+      if (!is.numeric(plot_data$Value)) {
+        p <- ggplot(plot_data, aes(x = Value, fill = Group)) +
+          geom_histogram(stat = "count", position = "dodge", alpha = 0.5) +
+          labs(title = paste("Distribution of", col),
+               x = col,
+               y = "Count") +
+          theme_classic() +
+          scale_fill_manual(values = c("Population" = "lightblue", "Subset" = "pink"))
+      } else {
+        p <- ggplot(plot_data, aes(x = Value, fill = Group)) +
+          geom_histogram(position = "identity", alpha = 0.5, bins = 20) +
+          labs(title = paste("Distribution of", col),
+               x = col,
+               y = "Frequency") +
+          theme_classic() +
+          scale_fill_manual(values = c("Population" = "lightblue", "Subset" = "pink"))
+      }
+      
+      # Add the plot to the list with the variable name as the key
+      plots_list[[col]] <- p
+    } else {
+      message(paste("Variable", col, "not found in both datasets. Skipping."))
+    }
+  }
+  
+  pipeline_object$histograms[[key]] <- plots_list
   return(pipeline_object)
 }
